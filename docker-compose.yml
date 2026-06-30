@@ -1,0 +1,163 @@
+# docker-compose.yml — LOCAL DEVELOPMENT ONLY
+# For staging overrides, see docker-compose.staging.yml
+# Usage: docker-compose up --build
+
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────
+  # FastAPI Backend
+  # ─────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexus_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app              # Hot-reload: mount source code
+    env_file:
+      - ./backend/.env.development
+    environment:
+      - APP_ENV=development
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - nexus_net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────
+  # Celery Worker (background tasks)
+  # ─────────────────────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexus_worker
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env.development
+    environment:
+      - APP_ENV=development
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    networks:
+      - nexus_net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────
+  # Celery Beat (scheduled tasks)
+  # ─────────────────────────────────────────
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexus_beat
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env.development
+    environment:
+      - APP_ENV=development
+    depends_on:
+      - redis
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    networks:
+      - nexus_net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────
+  # MongoDB (local — mirrors Atlas schema)
+  # ─────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: nexus_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./backend/scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: local_dev_password
+      MONGO_INITDB_DATABASE: nexus_dev
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus_net
+
+  # ─────────────────────────────────────────
+  # Redis (local — mirrors Upstash in prod)
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: nexus_redis
+    ports:
+      - "6500:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass "local_redis_password"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "local_redis_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus_net
+
+  # ─────────────────────────────────────────
+  # Frontend (Next.js — dev server)
+  # ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: nexus_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules          # Prevent host node_modules override
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_APP_ENV=development
+    depends_on:
+      - api
+    networks:
+      - nexus_net
+    restart: unless-stopped
+
+# ─────────────────────────────────────────
+# Volumes
+# ─────────────────────────────────────────
+volumes:
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ─────────────────────────────────────────
+# Networks
+# ─────────────────────────────────────────
+networks:
+  nexus_net:
+    driver: bridge

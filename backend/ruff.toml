@@ -1,0 +1,101 @@
+# ruff.toml — Nexus Backend
+# Ruff: Linter + Formatter for Python
+# Docs: https://docs.astral.sh/ruff/
+
+line-length = 100
+target-version = "py312"
+indent-width = 4
+
+# Directories to exclude from all checks
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".ruff_cache",
+    "*.egg-info",
+    "dist",
+    "build",
+]
+
+# ─────────────────────────────────────────────────────────────
+# Lint Configuration
+# ─────────────────────────────────────────────────────────────
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (undefined names, unused imports, etc.)
+    "I",    # isort (import sorting)
+    "B",    # flake8-bugbear (likely bugs + design issues)
+    "C4",   # flake8-comprehensions (simplify comprehensions)
+    "UP",   # pyupgrade (use modern Python syntax)
+    "N",    # pep8-naming conventions
+    "SIM",  # flake8-simplify (simplifiable code)
+    "TCH",  # flake8-type-checking (move type-only imports to TYPE_CHECKING)
+    "RUF",  # ruff-specific rules
+    "PT",   # flake8-pytest-style
+    "G",    # flake8-logging-format
+    "PIE",  # flake8-pie (miscellaneous fixes)
+    "T20",  # flake8-print (no print() in production code)
+]
+
+ignore = [
+    # Line too long — handled by formatter
+    "E501",
+    # Do not perform function calls in default arguments
+    # (FastAPI Depends pattern requires this)
+    "B008",
+    # First argument of a method should be named 'self'
+    # (conflicts with Pydantic v2 validators using 'cls')
+    "N805",
+    # Missing type annotation for self
+    "N804",
+    # Avoid specifying long messages outside the exception class
+    "EM101",
+    "EM102",
+    # Allow f-strings in logging (Loguru uses them natively)
+    "G004",
+    # Allow print in scripts/management commands
+    # Remove T201 from ignore if you want to enforce no-print strictly
+    "T201",
+    # Allow TODO comments
+    "FIX002",
+]
+
+# Allow auto-fix for these rules
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when their name starts with underscore
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[lint.per-file-ignores]
+# Test files: allow assertions, magic values, unused imports
+"tests/**" = ["S101", "PLR2004", "F401"]
+# Config file: allow complex expressions
+"app/config.py" = ["N802"]
+# Main app entry: allow star imports from conftest
+"app/main.py" = []
+
+[lint.isort]
+# Treat app as first-party
+known-first-party = ["app"]
+force-sort-within-sections = true
+combine-as-imports = true
+split-on-trailing-comma = true
+
+[lint.pep8-naming]
+# Allow Beanie / Pydantic patterns like 'Settings', 'User' as class names
+classmethod-decorators = ["classmethod", "pydantic.validator", "pydantic.root_validator"]
+
+# ─────────────────────────────────────────────────────────────
+# Format Configuration
+# ─────────────────────────────────────────────────────────────
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = 80

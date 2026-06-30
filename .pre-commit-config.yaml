@@ -1,0 +1,93 @@
+# .pre-commit-config.yaml — CollabSpace
+# Runs automatically on every `git commit` after: pre-commit install
+# Run manually: pre-commit run --all-files
+# Docs: https://pre-commit.com
+
+repos:
+  # ─────────────────────────────────────────
+  # Ruff — Lint + Format (primary quality gate)
+  # ─────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      # Lint and auto-fix
+      - id: ruff
+        args: [--fix]
+        files: ^backend/
+      # Format (ruff format)
+      - id: ruff-format
+        files: ^backend/
+
+  # ─────────────────────────────────────────
+  # Black — Formatter (secondary, for compatibility)
+  # ─────────────────────────────────────────
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3.12
+        files: ^backend/
+
+  # ─────────────────────────────────────────
+  # Mypy — Type Checking
+  # ─────────────────────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports, --config-file=backend/pyproject.toml]
+        files: ^backend/app/
+        additional_dependencies:
+          - pydantic>=2.7
+          - pydantic-settings>=2.3
+
+  # ─────────────────────────────────────────
+  # General File Health Checks
+  # ─────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # Trim trailing whitespace from all files
+      - id: trailing-whitespace
+        exclude: \.md$     # Allow trailing spaces in markdown (line breaks)
+      # Ensure all files end with a newline
+      - id: end-of-file-fixer
+        exclude: \.md$
+      # Validate YAML syntax
+      - id: check-yaml
+        args: [--unsafe]   # Allow custom YAML tags (e.g., !! in docker-compose)
+      # Validate JSON syntax
+      - id: check-json
+      # Prevent committing merge conflict markers
+      - id: check-merge-conflict
+      # Detect Python debugger imports (pdb, ipdb, breakpoint)
+      - id: debug-statements
+        files: ^backend/
+      # Warn about large files committed to git
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      # Prevent committing directly to protected branches
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, production]
+
+  # ─────────────────────────────────────────
+  # Secret Detection
+  # ─────────────────────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: \.env\.example$   # Ignore the template file (contains placeholders)
+
+# ─────────────────────────────────────────
+# Global Settings
+# ─────────────────────────────────────────
+default_language_version:
+  python: python3.12
+
+# Fail fast — stop at first hook failure
+fail_fast: false
+
+# Only run changed files (faster in large repos)
+default_stages: [pre-commit]
