@@ -40,6 +40,7 @@ Detailed description of the changes made, bulleted where appropriate.
 2. **Issue Number:** Must be specified in square brackets (e.g., `[#1]`).
 3. **Title Length:** Keep the short title under 72 characters.
 4. **Separation:** Ensure there is a blank line between the title and the description body.
+5. **Precision:** Keep commit descriptions, issue updates, and pull request comments small, precise, and directly to the point. Avoid verbose explanations.
 
 ### Examples
 * **Initial commit:**
