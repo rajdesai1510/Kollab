@@ -17,7 +17,11 @@ class BrandCreateRequest(BaseModel):
     """Body for POST /brands/profile — brand creates profile during onboarding."""
 
     business_name: str
-    category: Optional[BrandCategory] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
+    instagram_handle: Optional[str] = None
+    tagline: Optional[str] = None
+    website_url: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
 
@@ -39,7 +43,7 @@ class BrandUpdateRequest(BaseModel):
     business_name: Optional[str] = None
     tagline: Optional[str] = None
     description: Optional[str] = None
-    category: Optional[BrandCategory] = None
+    category: Optional[str] = None
     website_url: Optional[str] = None
     instagram_handle: Optional[str] = None
     city: Optional[str] = None
@@ -57,7 +61,7 @@ class BrandProfileResponse(BaseModel):
     tagline: Optional[str] = None
     description: Optional[str] = None
     logo_url: Optional[str] = None
-    category: Optional[BrandCategory] = None
+    category: Optional[str] = None
     website_url: Optional[str] = None
     instagram_handle: Optional[str] = None
     city: Optional[str] = None

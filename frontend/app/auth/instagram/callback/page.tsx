@@ -24,15 +24,21 @@ export default function InstagramCallbackPage() {
       const err = searchParams.get("error");
       const errReason = searchParams.get("error_reason");
 
+      let userRole = "creator";
+      try {
+        const me = await api.auth.me();
+        userRole = me.role || "creator";
+      } catch {}
+
       if (err) {
         setError(`Instagram connection failed: ${errReason || err}`);
-        setTimeout(() => router.push("/onboarding/creator/instagram"), 3000);
+        setTimeout(() => router.push(userRole === "brand" ? "/onboarding/brand?step=2" : "/onboarding/creator/instagram"), 3000);
         return;
       }
 
       if (!code) {
         setError("Invalid response from Instagram.");
-        setTimeout(() => router.push("/onboarding/creator/instagram"), 3000);
+        setTimeout(() => router.push(userRole === "brand" ? "/onboarding/brand?step=2" : "/onboarding/creator/instagram"), 3000);
         return;
       }
 
@@ -40,21 +46,23 @@ export default function InstagramCallbackPage() {
         await api.auth.connectInstagram(code);
         await refreshUser();
         
-        // Wait briefly for context to update, but we can also just check current state
-        // Actually, refreshUser() updates the context state, but it might not be synchronous for 'user' variable in this closure.
-        // Let's rely on api.auth.me() or just direct them based on a query param or assume if they hit this, they either come from settings or onboarding.
-        // A simple heuristic: if we are in auth callback, check if we want to redirect to details.
-        
         const me = await api.auth.me();
-        if (!me.onboarding_complete) {
-          router.push("/onboarding/creator/details");
+        if (me.role === "brand") {
+          if (!me.onboarding_complete) {
+            router.push("/onboarding/brand?step=2");
+          } else {
+            router.push("/brand/dashboard");
+          }
         } else {
-          router.push("/creator/dashboard");
+          if (!me.onboarding_complete) {
+            router.push("/onboarding/creator/details");
+          } else {
+            router.push("/creator/dashboard");
+          }
         }
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Failed to connect Instagram");
-        // Redirect back to connection page on failure after a delay
-        setTimeout(() => router.push("/onboarding/creator"), 3000);
+        setTimeout(() => router.push(userRole === "brand" ? "/onboarding/brand?step=2" : "/onboarding/creator"), 3000);
       }
     };
 

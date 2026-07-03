@@ -113,6 +113,10 @@ class BrandRouter:
             user_id=str(current_user.id),
             business_name=body.business_name,
             category=body.category,
+            tagline=body.tagline,
+            description=body.description,
+            website_url=body.website_url,
+            instagram_handle=body.instagram_handle or getattr(current_user, "instagram_username", None),
             city=body.city,
             state=body.state,
         )

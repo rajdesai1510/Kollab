@@ -52,7 +52,7 @@ class BrandProfile(Document):
     tagline: Optional[str] = None          # Short description shown on card
     description: Optional[str] = None     # Longer description on full profile
     logo_url: Optional[str] = None        # Stored in Cloudflare R2
-    category: Optional[BrandCategory] = None
+    category: Optional[str] = None
 
     # ── Online Presence ────────────────────────────────────────
     website_url: Optional[str] = None
