@@ -207,10 +207,10 @@ class CreatorRouter:
     async def sync_instagram(
         self,
         current_user: User = Depends(auth_middleware.require_role(UserRole.CREATOR)),
-    ) -> dict:
+    ) -> CreatorProfileResponse:
         """
-        Queue an immediate Instagram stat sync for the creator.
-        The actual sync runs in a Celery worker. Returns immediately.
+        Run an immediate Instagram stat sync for the creator and return the updated profile.
+        Returns a descriptive error if sync fails — never swallows errors.
         """
         if not current_user.instagram_user_id:
             raise HTTPException(
@@ -218,16 +218,42 @@ class CreatorRouter:
                 detail="No Instagram account connected. Please connect Instagram first.",
             )
 
-        # Lazy import to avoid circular dependency at module load
-        from app.tasks.instagram_sync import trigger_instagram_sync
-
         try:
             profile = await self.creator_service.get_by_user_id(str(current_user.id))
-            trigger_instagram_sync.delay(str(current_user.id), str(profile.id))
         except CreatorNotFoundError:
             raise HTTPException(status_code=404, detail="Creator profile not found.")
 
-        return {"message": "Instagram sync queued. Stats will update within 2 minutes."}
+        from app.services.instagram_service import (
+            InstagramService,
+            InstagramTokenExpiredError,
+            InstagramAPIError,
+        )
+
+        service = InstagramService()
+        try:
+            updated_profile = await service.sync_creator_stats(
+                user_id=str(current_user.id),
+                creator_profile_id=str(profile.id),
+            )
+            return CreatorProfileResponse.model_validate(updated_profile.model_dump())
+        except InstagramTokenExpiredError as e:
+            logger.warning(f"Token expired for creator {current_user.id}: {e}")
+            raise HTTPException(
+                status_code=401,
+                detail="Your Instagram session has expired. Please reconnect your Instagram account.",
+            )
+        except InstagramAPIError as e:
+            logger.error(f"Instagram API error for creator {current_user.id}: {e}")
+            raise HTTPException(status_code=502, detail=str(e))
+        except Exception as e:
+            logger.error(f"Unexpected sync error for creator {current_user.id}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred. Please try again later.",
+            )
+        finally:
+            await service.close()
+
 
 
 # ─────────────────────────────────────────────────────────────

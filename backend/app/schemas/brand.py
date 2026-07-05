@@ -64,6 +64,14 @@ class BrandProfileResponse(BaseModel):
     category: Optional[str] = None
     website_url: Optional[str] = None
     instagram_handle: Optional[str] = None
+    instagram_followers: int = 0
+    instagram_following: int = 0
+    instagram_post_count: int = 0
+    instagram_avg_likes: float = 0.0
+    instagram_avg_comments: float = 0.0
+    instagram_engagement_rate: float = 0.0
+    instagram_profile_pic_url: Optional[str] = None
+    instagram_last_synced: Optional[datetime] = None
     city: Optional[str] = None
     state: Optional[str] = None
     total_connections: int = 0

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.logger import logger
 from app.middleware.auth_middleware import auth_middleware
 from app.models.brand_profile import BrandProfile
 from app.models.user import User, UserRole
@@ -60,6 +61,12 @@ class BrandRouter:
             response_model=BrandProfileResponse,
         )
         self.router.add_api_route(
+            "/sync-instagram",
+            self.sync_instagram,
+            methods=["POST"],
+            summary="Manually trigger Instagram stat refresh for brand",
+        )
+        self.router.add_api_route(
             "/{brand_profile_id}",
             self.get_brand_profile,
             methods=["GET"],
@@ -83,6 +90,14 @@ class BrandRouter:
             category=getattr(profile, "category", None),
             website_url=getattr(profile, "website_url", None),
             instagram_handle=getattr(profile, "instagram_handle", None),
+            instagram_followers=getattr(profile, "instagram_followers", 0),
+            instagram_following=getattr(profile, "instagram_following", 0),
+            instagram_post_count=getattr(profile, "instagram_post_count", 0),
+            instagram_avg_likes=getattr(profile, "instagram_avg_likes", 0.0),
+            instagram_avg_comments=getattr(profile, "instagram_avg_comments", 0.0),
+            instagram_engagement_rate=getattr(profile, "instagram_engagement_rate", 0.0),
+            instagram_profile_pic_url=getattr(profile, "instagram_profile_pic_url", None),
+            instagram_last_synced=getattr(profile, "instagram_last_synced", None),
             city=getattr(profile, "city", None),
             state=getattr(profile, "state", None),
             total_connections=getattr(profile, "total_connections", 0),
@@ -184,6 +199,62 @@ class BrandRouter:
         await profile.save()
 
         return self._to_response(profile)
+
+    # ─────────────────────────────────────────────────────────
+    # Instagram Sync
+    # ─────────────────────────────────────────────────────────
+
+    async def sync_instagram(
+        self,
+        current_user: User = Depends(auth_middleware.require_role(UserRole.BRAND)),
+    ) -> BrandProfileResponse:
+        """
+        Run an immediate Instagram stat sync for the brand and return the updated profile.
+        Returns a descriptive error if sync fails — never swallows errors.
+        """
+        if not current_user.instagram_user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No Instagram account connected. Please connect Instagram first.",
+            )
+
+        profile = await BrandProfile.find_one(
+            BrandProfile.user_id == str(current_user.id)
+        )
+        if not profile:
+            raise HTTPException(status_code=404, detail="Brand profile not found.")
+
+        from app.services.instagram_service import (
+            InstagramService,
+            InstagramTokenExpiredError,
+            InstagramAPIError,
+        )
+
+        service = InstagramService()
+        try:
+            updated_profile = await service.sync_brand_stats(
+                user_id=str(current_user.id),
+                brand_profile_id=str(profile.id),
+            )
+            return self._to_response(updated_profile)
+        except InstagramTokenExpiredError as e:
+            logger.warning(f"Token expired for brand {current_user.id}: {e}")
+            raise HTTPException(
+                status_code=401,
+                detail="Your Instagram session has expired. Please reconnect your Instagram account.",
+            )
+        except InstagramAPIError as e:
+            logger.error(f"Instagram API error for brand {current_user.id}: {e}")
+            raise HTTPException(status_code=502, detail=str(e))
+        except Exception as e:
+            logger.error(f"Unexpected sync error for brand {current_user.id}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="An unexpected error occurred. Please try again later.",
+            )
+        finally:
+            await service.close()
+
 
 
 # ─────────────────────────────────────────────────────────────

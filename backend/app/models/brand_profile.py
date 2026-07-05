@@ -58,6 +58,16 @@ class BrandProfile(Document):
     website_url: Optional[str] = None
     instagram_handle: Optional[str] = None  # Brand's own Instagram (optional)
 
+    # ── Instagram Stats (Auto-synced) ──────────────────────────
+    instagram_followers: int = 0
+    instagram_following: int = 0
+    instagram_post_count: int = 0
+    instagram_avg_likes: float = 0.0
+    instagram_avg_comments: float = 0.0
+    instagram_engagement_rate: float = 0.0
+    instagram_profile_pic_url: Optional[str] = None
+    instagram_last_synced: Optional[datetime] = None
+
     # ── Location (Geolocation + Named Fields) ──────────────────
     city: Optional[str] = None
     state: Optional[str] = None

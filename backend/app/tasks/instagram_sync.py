@@ -90,6 +90,41 @@ class InstagramSyncTask:
                 "error": str(exc),
             }
 
+    def run_brand(self, user_id: str, brand_profile_id: Optional[str] = None) -> dict:
+        """
+        Synchronous entry point for syncing brand stats.
+        """
+        logger.info(
+            f"InstagramSyncTask.run_brand() started — "
+            f"user_id={user_id}, profile_id={brand_profile_id}"
+        )
+        try:
+            future = Future()
+            def target():
+                try:
+                    res = asyncio.run(self._sync_brand(user_id, brand_profile_id))
+                    future.set_result(res)
+                except Exception as e:
+                    future.set_exception(e)
+            
+            t = threading.Thread(target=target)
+            t.start()
+            result = future.result()
+
+            logger.success(f"InstagramSyncTask.run_brand() complete — user_id={user_id}")
+            return result
+        except Exception as exc:
+            logger.error(
+                f"InstagramSyncTask.run_brand() failed — "
+                f"user_id={user_id}: {exc}"
+            )
+            return {
+                "user_id": user_id,
+                "profile_id": brand_profile_id,
+                "status": "error",
+                "error": str(exc),
+            }
+
     async def _sync(
         self,
         user_id: str,
@@ -134,6 +169,48 @@ class InstagramSyncTask:
             updated_profile = await service.sync_creator_stats(
                 user_id=user_id,
                 creator_profile_id=resolved_profile_id,
+            )
+            return {
+                "user_id": user_id,
+                "profile_id": resolved_profile_id,
+                "status": "success",
+                "followers": updated_profile.instagram_followers,
+                "engagement_rate": updated_profile.instagram_engagement_rate,
+            }
+        finally:
+            await service.close()
+
+    async def _sync_brand(
+        self,
+        user_id: str,
+        brand_profile_id: Optional[str] = None,
+    ) -> dict:
+        """
+        Async core logic: resolve the BrandProfile ID if needed, then call InstagramService.
+        """
+        from app.core.database import db_manager
+        from app.models.brand_profile import BrandProfile
+        from app.services.instagram_service import InstagramService
+
+        await db_manager.connect()
+
+        resolved_profile_id = brand_profile_id
+        if not resolved_profile_id:
+            profile = await BrandProfile.find_one(
+                BrandProfile.user_id == user_id
+            )
+            if not profile:
+                raise ValueError(
+                    f"No BrandProfile found for user_id={user_id}. "
+                    f"Cannot sync Instagram stats."
+                )
+            resolved_profile_id = str(profile.id)
+
+        service = InstagramService()
+        try:
+            updated_profile = await service.sync_brand_stats(
+                user_id=user_id,
+                brand_profile_id=resolved_profile_id,
             )
             return {
                 "user_id": user_id,
@@ -228,6 +305,27 @@ def trigger_instagram_sync(
         return instagram_sync_task.run(user_id, creator_profile_id)
     except Exception as exc:
         logger.error(f"trigger_instagram_sync failed (attempt {self.request.retries + 1}): {exc}")
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(
+    name="tasks.instagram_sync.trigger_brand_instagram_sync",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+)
+def trigger_brand_instagram_sync(
+    self,
+    user_id: str,
+    brand_profile_id: Optional[str] = None,
+) -> dict:
+    """
+    Celery task: sync Instagram stats for a single brand.
+    """
+    try:
+        return instagram_sync_task.run_brand(user_id, brand_profile_id)
+    except Exception as exc:
+        logger.error(f"trigger_brand_instagram_sync failed (attempt {self.request.retries + 1}): {exc}")
         raise self.retry(exc=exc)
 
 
