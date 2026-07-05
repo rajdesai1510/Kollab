@@ -17,6 +17,7 @@ Usage:
 
 from datetime import datetime, timedelta
 from typing import Optional
+from uuid import uuid4
 
 from jose import ExpiredSignatureError, JWTError, jwt
 from pydantic import BaseModel
@@ -37,12 +38,14 @@ class TokenPayload(BaseModel):
         sub     — user ID (MongoDB ObjectId as string)
         role    — user role: 'creator' | 'brand' | 'admin'
         type    — token type: 'access' | 'refresh'
+        jti     — JWT ID: unique token identifier (present on refresh tokens)
         exp     — expiry timestamp (Unix epoch)
         iat     — issued-at timestamp (Unix epoch)
     """
     sub: str            # User ID
     role: str           # User role
     type: str           # 'access' or 'refresh'
+    jti: Optional[str] = None  # JWT ID — present on refresh tokens, used for Redis lookup
     exp: Optional[int] = None
     iat: Optional[int] = None
 
@@ -53,6 +56,7 @@ class TokenPair(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int     # Access token TTL in seconds
+    refresh_jti: str    # JTI of the refresh token (for Redis storage)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -110,16 +114,18 @@ class JWTManager:
             ttl=self._access_ttl,
         )
 
-    def create_refresh_token(self, user_id: str, role: str) -> str:
+    def create_refresh_token(self, user_id: str, role: str, jti: Optional[str] = None) -> str:
         """
         Issue a long-lived refresh token.
 
-        Stored in an httpOnly cookie on the client.
+        Stored in Redis server-side and in localStorage on the client.
         Used only on the /auth/refresh endpoint.
+        The jti (JWT ID) uniquely identifies this token in Redis.
 
         Args:
             user_id: MongoDB ObjectId of the user (as string)
             role: 'creator' | 'brand' | 'admin'
+            jti: Optional JWT ID; generated automatically if not provided
 
         Returns:
             Signed JWT string
@@ -129,17 +135,36 @@ class JWTManager:
             role=role,
             token_type="refresh",
             ttl=self._refresh_ttl,
+            jti=jti or str(uuid4()),
         )
 
-    def create_token_pair(self, user_id: str, role: str) -> TokenPair:
+    async def create_token_pair(self, user_id: str, role: str) -> TokenPair:
         """
-        Issue both access + refresh tokens in a single call.
+        Issue both access + refresh tokens and store the refresh token in Redis.
+
+        The refresh token is keyed by its jti (UUID) so it can be individually
+        revoked on logout or rotated on refresh.
+
         Used after login / OAuth callback.
         """
+        from app.core.token_store import token_store  # avoid circular import at module level
+
+        jti = str(uuid4())
+        access_token = self.create_access_token(user_id, role)
+        refresh_token = self.create_refresh_token(user_id, role, jti=jti)
+        ttl = int(self._refresh_ttl.total_seconds())
+
+        await token_store.save_refresh_token(
+            user_id=user_id,
+            jti=jti,
+            ttl_seconds=ttl,
+        )
+
         return TokenPair(
-            access_token=self.create_access_token(user_id, role),
-            refresh_token=self.create_refresh_token(user_id, role),
+            access_token=access_token,
+            refresh_token=refresh_token,
             expires_in=int(self._access_ttl.total_seconds()),
+            refresh_jti=jti,
         )
 
     def _create_token(
@@ -148,16 +173,19 @@ class JWTManager:
         role: str,
         token_type: str,
         ttl: timedelta,
+        jti: Optional[str] = None,
     ) -> str:
         """Internal token builder — sets standard claims and signs the token."""
         now = datetime.utcnow()
-        payload = {
+        payload: dict = {
             "sub": user_id,
             "role": role,
             "type": token_type,
             "iat": now,
             "exp": now + ttl,
         }
+        if jti:
+            payload["jti"] = jti
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
     # ─────────────────────────────────────────────────────────

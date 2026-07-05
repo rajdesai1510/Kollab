@@ -96,23 +96,30 @@ export interface BrandProfile {
   category: BrandCategory | null;
   website_url: string | null;
   instagram_handle: string | null;
+  instagram_followers: number;
+  instagram_following: number;
+  instagram_post_count: number;
+  instagram_avg_likes: number;
+  instagram_avg_comments: number;
+  instagram_engagement_rate: number;
+  instagram_profile_pic_url: string | null;
+  instagram_last_synced: string | null;
   city: string | null;
   state: string | null;
-  country: string;
   total_connections: number;
   total_campaigns_posted: number;
   created_at: string;
-  updated_at: string;
 }
 
 export interface BrandProfileFormData {
   business_name: string;
-  tagline: string;
-  description: string;
-  category: BrandCategory | null;
-  website_url: string;
-  city: string;
-  state: string;
+  tagline?: string;
+  description?: string;
+  category?: BrandCategory | null;
+  website_url?: string;
+  instagram_handle?: string;
+  city?: string;
+  state?: string;
 }
 
 // ─── Campaign ────────────────────────────────────────────────

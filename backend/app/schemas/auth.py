@@ -48,8 +48,9 @@ class TokenRefreshRequest(BaseModel):
 
 
 class TokenRefreshResponse(BaseModel):
-    """New access token issued after refresh."""
+    """Rotated token pair issued after a successful refresh."""
     access_token: str
+    refresh_token: str          # Rotated — client must store the new one
     token_type: str = "bearer"
     expires_in: int
 

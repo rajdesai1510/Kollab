@@ -36,6 +36,7 @@ const brandNav: NavItem[] = [
   { href: "/brand/discover", label: "Find Creators", icon: Search },
   { href: "/brand/campaigns", label: "Campaigns", icon: FileText },
   { href: "/brand/connections", label: "Connections", icon: Users },
+  { href: "/brand/profile", label: "My Profile", icon: User },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

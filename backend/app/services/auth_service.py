@@ -18,8 +18,8 @@ Usage:
     user, tokens = await auth_service.google_login(code="...", redirect_uri="...")
 """
 
-from datetime import datetime, timezone
-from typing import Tuple
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Tuple
 
 import httpx
 
@@ -59,6 +59,8 @@ class AuthService:
     GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
     INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
+    INSTAGRAM_LONG_LIVED_URL = "https://graph.instagram.com/access_token"
+    INSTAGRAM_REFRESH_URL = "https://graph.instagram.com/refresh_access_token"
     INSTAGRAM_USERINFO_URL = "https://graph.instagram.com/me"
 
     def __init__(self, jwt: JWTManager = jwt_manager) -> None:
@@ -101,11 +103,11 @@ class AuthService:
         user = await self._upsert_google_user(google_user)
 
         # Step 3: Update last_login_at
-        user.last_login_at = datetime.now(tz=timezone.utc  )
+        user.last_login_at = datetime.now(tz=timezone.utc)
         await user.save()
 
-        # Step 4: Issue token pair
-        tokens = self._jwt.create_token_pair(
+        # Step 4: Issue token pair (stores refresh token in Redis)
+        tokens = await self._jwt.create_token_pair(
             user_id=str(user.id),
             role=user.role.value,
         )
@@ -201,13 +203,10 @@ class AuthService:
         """
         Connect an Instagram account to an existing Nexus user.
 
-        Called after the user has already logged in via Google and
-        navigates to /settings → "Connect Instagram".
-
         Steps:
-          1. Exchange code → Instagram short-lived access token
-          2. Fetch Instagram user ID and username
-          3. Encrypt the token and store on the user document
+          1. Exchange code → short-lived token (1 hour)
+          2. Exchange short-lived token → long-lived token (60 days)
+          3. Encrypt the long-lived token and store with expiry time
           4. Trigger background stat sync via Celery
 
         Args:
@@ -216,60 +215,172 @@ class AuthService:
 
         Returns:
             Updated User document
+
+        Raises:
+            OAuthError: If any step of the token exchange fails
         """
-        # Step 1: Exchange code → Instagram access token
-        access_token = None
-        instagram_user_id = None
+        # Step 1: Exchange code → short-lived access token (1 hour)
+        short_lived_token, instagram_user_id = await self._exchange_code_for_token(code)
 
-        if not (settings.is_development and (code == "mock_code" or code.startswith("mock_"))):
-            try:
-                token_response = await self.http.post(
-                    self.INSTAGRAM_TOKEN_URL,
-                    data={
-                        "client_id": settings.INSTAGRAM_APP_ID,
-                        "client_secret": settings.INSTAGRAM_APP_SECRET,
-                        "grant_type": "authorization_code",
-                        "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
-                        "code": code,
-                    },
-                )
+        # Step 2: Exchange short-lived → long-lived token (60 days)
+        long_lived_token, expires_in_seconds = await self._exchange_for_long_lived_token(short_lived_token)
 
-                if token_response.status_code == 200:
-                    token_data = token_response.json()
-                    access_token = token_data.get("access_token")
-                    instagram_user_id = token_data.get("user_id")
-                else:
-                    if not settings.is_development:
-                        raise OAuthError(f"Instagram token exchange failed: {token_response.text}")
-                    else:
-                        logger.warning(f"Live Instagram token exchange failed: {token_response.text}")
-            except Exception as e:
-                if not settings.is_development:
-                    raise OAuthError(f"Instagram token exchange failed: {e}")
-                else:
-                    logger.warning(f"Live Instagram token exchange failed in dev: {e}")
-
-        if not access_token or not instagram_user_id:
-            if settings.is_development:
-                access_token = "mock_instagram_access_token_12345"
-                instagram_user_id = "mock_instagram_user_id_99999"
-                logger.info("Using mock Instagram credentials in development mode.")
-            else:
-                raise OAuthError("Instagram did not return expected credentials.")
-
-        # Step 2: Encrypt and store
+        # Step 3: Encrypt and store long-lived token + expiry
         user.instagram_user_id = str(instagram_user_id)
-        user.instagram_access_token_encrypted = encryption_manager.encrypt(access_token)
+        user.instagram_access_token_encrypted = encryption_manager.encrypt(long_lived_token)
+        user.instagram_token_expires_at = datetime.now(tz=timezone.utc) + timedelta(seconds=expires_in_seconds)
         await user.save()
 
         logger.info(
-            f"Instagram connected — user_id={user.id}, ig_user_id={instagram_user_id}"
+            f"Instagram connected (long-lived token) — user_id={user.id}, "
+            f"ig_user_id={instagram_user_id}, "
+            f"expires_at={user.instagram_token_expires_at.isoformat()}"
         )
 
-        # Step 3: Trigger background sync (import here to avoid circular imports)
+        # Step 4: Trigger background sync
         from app.tasks.instagram_sync import trigger_instagram_sync
         trigger_instagram_sync.delay(str(user.id))
 
+        return user
+
+    async def _exchange_code_for_token(self, code: str) -> Tuple[str, str]:
+        """
+        Exchange Instagram OAuth code for a short-lived access token (1 hour).
+
+        Returns:
+            Tuple of (access_token, instagram_user_id)
+
+        Raises:
+            OAuthError: If the exchange fails
+        """
+        response = await self.http.post(
+            self.INSTAGRAM_TOKEN_URL,
+            data={
+                "client_id": settings.INSTAGRAM_APP_ID,
+                "client_secret": settings.INSTAGRAM_APP_SECRET,
+                "grant_type": "authorization_code",
+                "redirect_uri": settings.INSTAGRAM_REDIRECT_URI,
+                "code": code,
+            },
+        )
+
+        if response.status_code != 200:
+            raise OAuthError(
+                f"Instagram short-lived token exchange failed ({response.status_code}): {response.text}"
+            )
+
+        data = response.json()
+        access_token = data.get("access_token")
+        instagram_user_id = data.get("user_id")
+
+        if not access_token or not instagram_user_id:
+            raise OAuthError(
+                f"Instagram did not return expected credentials. Response: {data}"
+            )
+
+        logger.info(f"Instagram short-lived token obtained — ig_user_id={instagram_user_id}")
+        return str(access_token), str(instagram_user_id)
+
+    async def _exchange_for_long_lived_token(self, short_lived_token: str) -> Tuple[str, int]:
+        """
+        Exchange a short-lived Instagram token for a long-lived token (60 days).
+
+        Returns:
+            Tuple of (long_lived_access_token, expires_in_seconds)
+
+        Raises:
+            OAuthError: If the exchange fails
+        """
+        response = await self.http.get(
+            self.INSTAGRAM_LONG_LIVED_URL,
+            params={
+                "grant_type": "ig_exchange_token",
+                "client_secret": settings.INSTAGRAM_APP_SECRET,
+                "access_token": short_lived_token,
+            },
+        )
+
+        if response.status_code != 200:
+            raise OAuthError(
+                f"Instagram long-lived token exchange failed ({response.status_code}): {response.text}"
+            )
+
+        data = response.json()
+        long_lived_token = data.get("access_token")
+        expires_in = data.get("expires_in", 5_184_000)  # Default: 60 days in seconds
+
+        if not long_lived_token:
+            raise OAuthError(
+                f"Instagram did not return a long-lived token. Response: {data}"
+            )
+
+        logger.info(
+            f"Instagram long-lived token obtained — expires_in={expires_in}s "
+            f"({round(expires_in / 86400)} days)"
+        )
+        return long_lived_token, expires_in
+
+    async def refresh_instagram_token(self, user: User) -> Optional[User]:
+        """
+        Refresh the user's Instagram long-lived token before it expires.
+
+        Instagram long-lived tokens can be refreshed when they are at least
+        24 hours old and have not yet expired. Refreshing resets the 60-day
+        expiry window.
+
+        This should be called automatically by a periodic background task
+        (e.g., daily) for all users whose token expires within 7 days.
+
+        Returns:
+            Updated User document, or None if refresh was not needed / not possible.
+
+        Raises:
+            OAuthError: If the refresh API call fails
+        """
+        if not user.instagram_access_token_encrypted:
+            logger.warning(f"refresh_instagram_token: user {user.id} has no token stored")
+            return None
+
+        # Don't refresh tokens with more than 7 days remaining
+        if user.instagram_token_expires_at:
+            days_remaining = (user.instagram_token_expires_at - datetime.now(tz=timezone.utc)).days
+            if days_remaining > 7:
+                logger.debug(
+                    f"Instagram token refresh skipped — {days_remaining} days remaining (user={user.id})"
+                )
+                return None
+
+        current_token = encryption_manager.decrypt(user.instagram_access_token_encrypted)
+
+        response = await self.http.get(
+            self.INSTAGRAM_REFRESH_URL,
+            params={
+                "grant_type": "ig_refresh_token",
+                "access_token": current_token,
+            },
+        )
+
+        if response.status_code != 200:
+            raise OAuthError(
+                f"Instagram token refresh failed ({response.status_code}): {response.text}"
+            )
+
+        data = response.json()
+        new_token = data.get("access_token")
+        expires_in = data.get("expires_in", 5_184_000)
+
+        if not new_token:
+            raise OAuthError(f"Instagram refresh did not return a new token. Response: {data}")
+
+        user.instagram_access_token_encrypted = encryption_manager.encrypt(new_token)
+        user.instagram_token_expires_at = datetime.now(tz=timezone.utc) + timedelta(seconds=expires_in)
+        user.updated_at = datetime.now(tz=timezone.utc)
+        await user.save()
+
+        logger.info(
+            f"Instagram token refreshed — user_id={user.id}, "
+            f"new_expires_at={user.instagram_token_expires_at.isoformat()}"
+        )
         return user
 
     # ─────────────────────────────────────────────────────────

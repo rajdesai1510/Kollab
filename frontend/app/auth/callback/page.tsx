@@ -22,12 +22,16 @@ function CallbackHandler() {
 
   useEffect(() => {
     const token = searchParams.get("token");
+    const refreshToken = searchParams.get("refresh_token");
+
     if (!token) {
       router.replace("/auth/login?error=no_token");
       return;
     }
 
     tokenStore.set(token);
+    if (refreshToken) tokenStore.setRefresh(refreshToken);
+
     refreshUser().then(() => {
       router.replace("/dashboard");
     });
