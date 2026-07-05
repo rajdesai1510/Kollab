@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { useAuth } from "@/lib/auth-context";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Loader2, Save, RefreshCw, AlertCircle, CheckCircle, MapPin } from "lucide-react";
+import {
+  Loader2, Save, RefreshCw, AlertCircle, CheckCircle,
+  Camera, MapPin, AlertTriangle, CheckCheck,
+} from "lucide-react";
 import type { NicheCategory, CollabType } from "@/types";
 import {
   INDIA_STATES_AND_DISTRICTS,
@@ -34,10 +37,12 @@ const MOCK_AVATARS = [
   "https://api.dicebear.com/7.x/adventurer/svg?seed=Arjun",
 ];
 
+const INSTAGRAM_CONNECT_URL = `${process.env.NEXT_PUBLIC_API_URL}/api/auth/instagram/start`;
+
 export default function CreatorProfilePage() {
   const { user, refreshUser } = useAuth();
+  const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
@@ -100,6 +105,26 @@ export default function CreatorProfilePage() {
     enabled: !!user,
     retry: false,
   });
+
+  const syncMutation = useMutation({
+    mutationFn: () => api.creators.syncInstagram(),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["creator-profile"], updated);
+      refetch();
+      refreshUser();
+    },
+  });
+
+  const syncError = syncMutation.error instanceof Error
+    ? syncMutation.error.message
+    : syncMutation.isError ? "Sync failed. Please try again." : null;
+
+  const isTokenError = !!(syncError && (
+    syncError.toLowerCase().includes("expired") ||
+    syncError.toLowerCase().includes("reconnect") ||
+    syncError.toLowerCase().includes("invalid") ||
+    syncError.toLowerCase().includes("oauth")
+  ));
 
   const [form, setForm] = useState({
     display_name: "",
@@ -182,22 +207,6 @@ export default function CreatorProfilePage() {
     }
   };
 
-  const handleSyncInstagram = async () => {
-    setError("");
-    setSuccess("");
-    setIsSyncing(true);
-    try {
-      const res = await api.creators.syncInstagram();
-      await refetch();
-      await refreshUser();
-      setSuccess(res.message || "Instagram stats synced successfully!");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to sync Instagram");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   if (isLoading) {
     return (
       <AppShell>
@@ -212,29 +221,11 @@ export default function CreatorProfilePage() {
     <AppShell>
       <div className="max-w-4xl mx-auto space-y-8 pb-12">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="font-outfit text-3xl font-bold text-slate-800">My Profile</h1>
-            <p className="text-slate-500 text-sm mt-1">
-              Customize your profile details, manage niches, and sync Instagram stats.
-            </p>
-          </div>
-          {user?.instagram_connected && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isSyncing}
-              onClick={handleSyncInstagram}
-              className="flex items-center gap-2 self-start sm:self-auto"
-            >
-              {isSyncing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <RefreshCw className="w-4 h-4" />
-              )}
-              Sync Instagram Stats
-            </Button>
-          )}
+        <div>
+          <h1 className="font-outfit text-3xl font-bold text-slate-800">My Profile</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            Customize your profile details, manage niches, and sync Instagram stats.
+          </p>
         </div>
 
         {/* Notifications */}
@@ -305,41 +296,117 @@ export default function CreatorProfilePage() {
               </div>
             </div>
 
-            {/* Instagram Connection Stats Card */}
-            <div className="bg-white border border-slate-100 shadow-sm rounded-3xl p-6 space-y-4">
-              <h2 className="font-outfit text-base font-bold text-slate-800">
-                Instagram Connection
-              </h2>
+            {/* Instagram Connection Card */}
+            <div className={`rounded-3xl border p-6 space-y-4 ${
+              user?.instagram_connected
+                ? "bg-gradient-to-br from-pink-50 to-purple-50 border-pink-100"
+                : "bg-white border-slate-100 shadow-sm"
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Camera className={`w-5 h-5 ${user?.instagram_connected ? "text-pink-600" : "text-slate-400"}`} />
+                  <h2 className="font-outfit text-base font-bold text-slate-800">Instagram</h2>
+                </div>
+                {user?.instagram_connected ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-green-100 text-green-700 px-2.5 py-1 rounded-full">
+                    <CheckCheck className="w-3 h-3" /> Connected
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full">
+                    Not connected
+                  </span>
+                )}
+              </div>
+
               {user?.instagram_connected ? (
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center text-sm border-b border-slate-50 pb-2">
-                    <span className="text-slate-400">Instagram Handle</span>
-                    <span className="font-semibold text-slate-800">@{profile?.instagram_handle}</span>
+                  {profile?.instagram_handle && (
+                    <div className="flex items-center gap-2 bg-white/70 rounded-xl px-3 py-2">
+                      <span className="text-slate-400 text-xs">@</span>
+                      <span className="font-semibold text-slate-800 text-sm">{profile.instagram_handle}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white/70 rounded-xl px-3 py-2.5 text-center">
+                      <p className="text-xs text-slate-400">Followers</p>
+                      <p className="font-bold text-slate-800 text-sm mt-0.5">
+                        {profile?.instagram_followers
+                          ? profile.instagram_followers.toLocaleString()
+                          : <span className="text-slate-300">—</span>}
+                      </p>
+                    </div>
+                    <div className="bg-white/70 rounded-xl px-3 py-2.5 text-center">
+                      <p className="text-xs text-slate-400">Engagement</p>
+                      <p className="font-bold text-slate-800 text-sm mt-0.5">
+                        {profile?.instagram_engagement_rate
+                          ? `${profile.instagram_engagement_rate}%`
+                          : <span className="text-slate-300">—</span>}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center text-sm border-b border-slate-50 pb-2">
-                    <span className="text-slate-400">Followers</span>
-                    <span className="font-semibold text-slate-800">{profile?.instagram_followers?.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm border-b border-slate-50 pb-2">
-                    <span className="text-slate-400">Engagement Rate</span>
-                    <span className="font-semibold text-slate-800">{profile?.instagram_engagement_rate}%</span>
-                  </div>
-                  {profile?.instagram_last_synced && (
-                    <p className="text-[10px] text-slate-400 text-right italic">
-                      Last synced: {new Date(profile.instagram_last_synced).toLocaleString()}
+
+                  {syncError ? (
+                    <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-2">
+                      <p className="text-xs text-red-600 flex items-start gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                        {syncError}
+                      </p>
+                      {isTokenError ? (
+                        <a
+                          href={INSTAGRAM_CONNECT_URL}
+                          className="w-full flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-700 text-white text-xs font-semibold rounded-xl py-2 transition-colors"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          Reconnect Instagram
+                        </a>
+                      ) : (
+                        <button
+                          onClick={() => syncMutation.mutate()}
+                          className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl py-2 transition-colors"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Try again
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => syncMutation.mutate()}
+                      disabled={syncMutation.isPending}
+                      className="w-full flex items-center justify-center gap-2 bg-white/80 hover:bg-white border border-pink-200 text-pink-700 text-xs font-semibold rounded-xl py-2.5 transition-colors disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                      {syncMutation.isPending ? "Syncing..." : "Sync stats"}
+                    </button>
+                  )}
+
+                  {syncMutation.isSuccess && (
+                    <p className="text-[11px] text-green-600 text-center flex items-center justify-center gap-1">
+                      <CheckCircle className="w-3 h-3" /> Stats updated just now
+                    </p>
+                  )}
+
+                  {profile?.instagram_last_synced && !syncMutation.isSuccess && (
+                    <p className="text-[10px] text-slate-400 text-center">
+                      Last synced {new Date(profile.instagram_last_synced).toLocaleString("en-IN", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
                     </p>
                   )}
                 </div>
               ) : (
-                <div className="text-center py-2 space-y-3">
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Connecting Instagram allows you to verify your follower counts and engagement metrics.
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Connect your Instagram so brands can see your real follower count and engagement metrics.
                   </p>
                   <a
-                    href={`${process.env.NEXT_PUBLIC_API_URL}/api/auth/instagram/connect`}
-                    className="w-full h-10 flex items-center justify-center text-xs font-semibold rounded-xl bg-pink-50 text-pink-600 hover:bg-pink-100 transition-colors"
+                    href={INSTAGRAM_CONNECT_URL}
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-pink-500 to-purple-600 hover:opacity-90 text-white text-sm font-semibold rounded-xl py-2.5 transition-opacity"
                   >
-                    Link Instagram
+                    <Camera className="w-4 h-4" />
+                    Connect Instagram
                   </a>
                 </div>
               )}

@@ -52,6 +52,7 @@ class CeleryAppFactory:
             backend=settings.CELERY_RESULT_BACKEND,
             include=[
                 "app.tasks.instagram_sync",
+                "app.tasks.instagram_token_refresh",
             ],
         )
 
@@ -72,11 +73,17 @@ class CeleryAppFactory:
             result_expires=3600,
             # Worker concurrency (override via docker-compose command)
             worker_prefetch_multiplier=1,  # Fair task distribution
-            # Beat schedule — Instagram stat refresh every 48 hours
+            # Beat schedule
             beat_schedule={
+                # Refresh Instagram stats for all connected users every 48 hours
                 "refresh-instagram-stats-48h": {
                     "task": "tasks.instagram_sync.trigger_instagram_sync_all",
-                    "schedule": 48 * 60 * 60,  # 48 hours in seconds
+                    "schedule": 48 * 60 * 60,
+                },
+                # Refresh expiring Instagram OAuth tokens once per day at 3am IST
+                "refresh-instagram-tokens-daily": {
+                    "task": "tasks.instagram_token_refresh.refresh_expiring_instagram_tokens",
+                    "schedule": 24 * 60 * 60,  # Every 24 hours
                 },
             },
         )
