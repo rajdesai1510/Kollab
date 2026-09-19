@@ -1,5 +1,7 @@
 # Kollab
 
+## **Idea**: The idea was to create a creator marketplace and to expand it to a fully fledged creator-brand platform with advanced analytics and connection algorithm. Currently on hold, if you have any idea or wanna contribute it, connect with me on LINKEDIN.
+
 > **A city-aware creator-brand matchmaking platform for Indian micro-influencers.**
 > Verified creator profiles. Structured deal flow. No more cold DMs.
 
