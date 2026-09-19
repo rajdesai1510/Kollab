@@ -1,4 +1,4 @@
-# Nexus 🤝
+# Kollab
 
 > **A city-aware creator-brand matchmaking platform for Indian micro-influencers.**
 > Verified creator profiles. Structured deal flow. No more cold DMs.
